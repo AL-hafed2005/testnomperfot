@@ -3,22 +3,27 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>عداد خطوات ذكي - بدون غش</title>
+  <title>عداد خطوات ذكي مع GPS - بدون غش</title>
   <style>
     body {
       font-family: Arial, sans-serif;
       text-align: center;
-      padding: 30px;
-      background: #f5f5f5;
+      padding: 20px;
+      background: #f9f9f9;
       color: #333;
     }
-    #steps {
-      font-size: 60px;
-      color: #2c3e50;
-      margin: 20px 0;
+    .box {
+      background: white;
+      padding: 20px;
+      margin: 15px auto;
+      border-radius: 12px;
+      max-width: 350px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
     }
-    .label {
-      font-size: 22px;
+    #steps, #distance {
+      font-size: 50px;
+      font-weight: bold;
+      color: #2980b9;
     }
     #status {
       margin-top: 15px;
@@ -26,83 +31,172 @@
       border-radius: 8px;
       background: #ecf0f1;
     }
+    .label {
+      font-size: 18px;
+      margin-top: 10px;
+      color: #555;
+    }
   </style>
 </head>
 <body>
-  <div class="label">عدد الخطوات:</div>
-  <div id="steps">0</div>
-  <div id="status">جارٍ التحقق من الحساس...</div>
+  <div class="box">
+    <div class="label">عدد الخطوات</div>
+    <div id="steps">0</div>
+    
+    <div class="label">المسافة (كم)</div>
+    <div id="distance">0.00</div>
+    
+    <div id="status">اضغط لبدء التمرين (يتطلب GPS + حساس)</div>
+  </div>
 
   <script>
+    // --- المتغيرات الأساسية ---
     let stepCount = 0;
-    let lastPeakTime = 0;
+    let totalDistance = 0;
     let lastAccel = 0;
-    let lastValleyTime = 0;
-    let isValleyDetected = false;
+    let lastGpsPosition = null;
+    let isRecording = false;
+    let lastStepTime = 0;
+    let lastGpsUpdate = 0;
 
-    // عتبات مضبوطة لمنع الغش
-    const ACCEL_THRESHOLD = 1.5;   // الحد الأدنى للتسارع ليُعتبر حركة
-    const MIN_TIME_BETWEEN_STEPS = 300;   // أقل من 300ms = غش (اهتزاز سريع)
-    const MAX_TIME_BETWEEN_PEAK_VALLEY = 800; // ذروة ثم انخفاض خلال 800ms = خطوة حقيقية
+    // --- عتبات منع الغش ---
+    const ACCEL_THRESHOLD = 1.5;
+    const MIN_STEP_INTERVAL = 400; // ms
+    const GPS_UPDATE_INTERVAL = 2000; // تحديث كل ثانيتين
+    const MIN_DISTANCE_TO_VALIDATE = 0.5; // متر
 
-    function handleMotion(event) {
+    // --- دوال مساعدة ---
+    function haversine(lat1, lon1, lat2, lon2) {
+      const R = 6371000; // متر
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c;
+    }
+
+    function handleAccelerometer(event) {
+      if (!isRecording) return;
       const acc = event.accelerationIncludingGravity;
       if (!acc) return;
 
       const now = Date.now();
-      const accel = Math.sqrt(acc.x ** 2 + acc.y ** 2 + acc.z ** 2);
-      const delta = accel - lastAccel;
+      const accel = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
+      const delta = Math.abs(accel - lastAccel);
       lastAccel = accel;
 
-      // اكتشاف "انخفاض" (valley): تسارع منخفض بعد ارتفاع
-      if (accel < 8.0 && delta < -0.8) {
-        lastValleyTime = now;
-        isValleyDetected = true;
-      }
-
-      // اكتشاف "ذروة" (peak): تسارع مرتفع
-      if (Math.abs(delta) > ACCEL_THRESHOLD) {
-        // تحقق: هل سبقته "انخفاض" خلال فترة زمنية منطقية؟
-        if (isValleyDetected && (now - lastValleyTime) < MAX_TIME_BETWEEN_PEAK_VALLEY) {
-          // تحقق: هل مر وقت كافٍ منذ آخر خطوة؟
-          if ((now - lastPeakTime) > MIN_TIME_BETWEEN_STEPS) {
-            stepCount++;
-            document.getElementById('steps').textContent = stepCount;
-            lastPeakTime = now;
-            isValleyDetected = false; // إعادة التعيين بعد العدّ
-          }
-        }
+      // كشف خطوة محتملة (بدون حفظها بعد)
+      if (delta > ACCEL_THRESHOLD && (now - lastStepTime) > MIN_STEP_INTERVAL) {
+        // لا نزيد العد هنا! سننتظر تأكيد GPS
+        detectStepPending = true;
+        stepPendingTime = now;
       }
     }
 
-    // --- بدء التشغيل ---
-    const statusEl = document.getElementById('status');
+    let detectStepPending = false;
+    let stepPendingTime = 0;
 
-    if (typeof DeviceMotionEvent !== 'undefined') {
-      if (typeof DeviceMotionEvent.requestPermission === 'function') {
-        statusEl.textContent = 'اضغط في أي مكان لتفعيل الحساس';
-        const enableSensor = () => {
-          DeviceMotionEvent.requestPermission()
-            .then(state => {
-              if (state === 'granted') {
-                window.addEventListener('devicemotion', handleMotion);
-                statusEl.textContent = '✅ جاهز! المشي فقط يُحسب (الغش ممنوع).';
-              } else {
-                statusEl.textContent = '❌ لم يُمنح إذن الوصول إلى الحساس.';
-              }
-            })
-            .catch(err => {
-              statusEl.textContent = 'خطأ: ' + err.message;
-            });
-        };
-        document.body.addEventListener('click', enableSensor, { once: true });
-        document.body.addEventListener('touchstart', enableSensor, { once: true });
-      } else {
-        window.addEventListener('devicemotion', handleMotion);
-        statusEl.textContent = '✅ جاهز! المشي فقط يُحسب (الغش ممنوع).';
+    function updateGpsPosition() {
+      if (!isRecording) return;
+      const now = Date.now();
+      if (now - lastGpsUpdate < GPS_UPDATE_INTERVAL) return;
+
+      if (!navigator.geolocation) {
+        document.getElementById('status').textContent = '❌ GPS غير مدعوم';
+        return;
       }
-    } else {
-      statusEl.textContent = '❌ هذا الجهاز لا يدعم حساسات الحركة.';
+
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const { latitude, longitude } = pos.coords;
+          lastGpsUpdate = now;
+
+          // حساب المسافة من آخر موقع
+          if (lastGpsPosition) {
+            const distance = haversine(
+              lastGpsPosition.lat,
+              lastGpsPosition.lng,
+              latitude,
+              longitude
+            );
+            totalDistance += distance;
+            document.getElementById('distance').textContent = (totalDistance / 1000).toFixed(2);
+
+            // ✅ التحقق المزدوج: إذا كان هناك خطوة محتملة + مسافة > 0.5 متر
+            if (detectStepPending && distance >= MIN_DISTANCE_TO_VALIDATE) {
+              stepCount++;
+              document.getElementById('steps').textContent = stepCount;
+              lastStepTime = stepPendingTime;
+            }
+          }
+
+          lastGpsPosition = { lat: latitude, lng: longitude };
+          detectStepPending = false; // إعادة التعيين
+        },
+        (error) => {
+          console.warn('GPS Error:', error);
+          document.getElementById('status').textContent = '⚠️ خطأ في GPS';
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+      );
+    }
+
+    // --- بدء/إيقاف التمرين ---
+    function toggleRecording() {
+      const statusEl = document.getElementById('status');
+      if (!isRecording) {
+        // طلب إذن الحساس (إن لزم)
+        if (typeof DeviceMotionEvent.requestPermission === 'function') {
+          DeviceMotionEvent.requestPermission().then(permission => {
+            if (permission === 'granted') {
+              startRecording();
+            } else {
+              statusEl.textContent = '❌ رُفض الوصول إلى الحساس';
+            }
+          }).catch(console.error);
+        } else {
+          startRecording();
+        }
+      } else {
+        stopRecording();
+      }
+    }
+
+    function startRecording() {
+      isRecording = true;
+      stepCount = 0;
+      totalDistance = 0;
+      lastGpsPosition = null;
+      detectStepPending = false;
+      document.getElementById('steps').textContent = '0';
+      document.getElementById('distance').textContent = '0.00';
+      document.getElementById('status').textContent = 'جاري التسجيل...';
+
+      window.addEventListener('devicemotion', handleAccelerometer);
+      updateGpsPosition(); // أول قراءة
+      gpsInterval = setInterval(updateGpsPosition, GPS_UPDATE_INTERVAL);
+    }
+
+    function stopRecording() {
+      isRecording = false;
+      clearInterval(gpsInterval);
+      window.removeEventListener('devicemotion', handleAccelerometer);
+      document.getElementById('status').textContent = 'تم الإيقاف. اضغط للبدء من جديد.';
+    }
+
+    // --- تهيئة ---
+    let gpsInterval = null;
+    document.body.addEventListener('click', toggleRecording, { once: false });
+    document.body.addEventListener('touchstart', toggleRecording, { once: false });
+
+    // تحقق أولي
+    if (!('DeviceMotionEvent' in window)) {
+      document.getElementById('status').textContent = '❌ الحساس غير مدعوم';
+    }
+    if (!navigator.geolocation) {
+      document.getElementById('status').textContent = '❌ GPS غير مدعوم';
     }
   </script>
 </body>
