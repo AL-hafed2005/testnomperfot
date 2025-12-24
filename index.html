@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>اكتشاف الموقع الحقيقي</title>
+  <title>حساب المسافة المشيّة بدقة</title>
   <style>
     body {
       font-family: 'Segoe UI', Tahoma, sans-serif;
@@ -17,23 +17,29 @@
       padding: 25px;
       margin: 20px auto;
       border-radius: 14px;
-      max-width: 400px;
+      max-width: 420px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.08);
     }
     h2 {
       margin-top: 0;
       color: #2c3e50;
     }
+    .metric {
+      font-size: 24px;
+      font-weight: bold;
+      color: #2980b9;
+      margin: 12px 0;
+    }
     .coord {
-      font-size: 20px;
       font-family: monospace;
       background: #f1f8ff;
-      padding: 12px;
+      padding: 10px;
       border-radius: 8px;
-      margin: 12px 0;
+      margin: 10px 0;
       direction: ltr;
       text-align: center;
       border: 1px solid #bee0ff;
+      font-size: 16px;
     }
     #status {
       padding: 12px;
@@ -44,7 +50,7 @@
     .pending { background: #fff8e1; color: #5d4037; }
     .success { background: #e8f5e9; color: #2e7d32; }
     .error { background: #ffebee; color: #c62828; }
-    button {
+    .btn {
       background: #3498db;
       color: white;
       border: none;
@@ -52,95 +58,162 @@
       font-size: 18px;
       border-radius: 8px;
       cursor: pointer;
-      margin-top: 10px;
+      margin: 10px 5px;
+      width: 45%;
     }
-    button:hover {
-      background: #2980b9;
-    }
+    .btn.stop { background: #e74c3c; }
+    .btn:hover { opacity: 0.9; }
+    .row { display: flex; justify-content: center; }
   </style>
 </head>
 <body>
 
   <div class="card">
-    <h2>اكتشاف الموقع الجغرافي</h2>
+    <h2>حساب المسافة بدقة عالية</h2>
     
-    <div id="status" class="pending">جارٍ طلب إذن الوصول إلى الموقع...</div>
+    <div id="status" class="pending">اضغط "ابدأ" لتفعيل GPS</div>
 
-    <div id="lat">خط العرض: —</div>
-    <div id="lng">خط الطول: —</div>
+    <div class="metric" id="distance">0.00 م</div>
+    
+    <div class="coord" id="lat">خط العرض: —</div>
+    <div class="coord" id="lng">خط الطول: —</div>
 
-    <button id="startBtn">اكتشاف الموقع الآن</button>
+    <div class="row">
+      <button id="startBtn" class="btn">ابدأ</button>
+      <button id="stopBtn" class="btn stop" disabled>إيقاف</button>
+    </div>
   </div>
 
   <script>
+    // --- المتغيرات ---
+    let isTracking = false;
+    let totalDistance = 0;
+    let lastPosition = null;
+    let positionInterval = null;
+    let lastValidPosition = null;
+
+    // --- عتبات الفلترة ---
+    const MIN_DISTANCE_PER_STEP = 2.0; // متر: لا نحسب حركة أقل من 2 متر
+    const UPDATE_INTERVAL = 1500;       // تحديث كل 1.5 ثانية
+
     const statusEl = document.getElementById('status');
+    const distanceEl = document.getElementById('distance');
     const latEl = document.getElementById('lat');
     const lngEl = document.getElementById('lng');
     const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
 
-    // تحويل إحداثيات إلى نص عربي واضح
-    function updateCoords(lat, lng) {
-      latEl.textContent = `خط العرض: ${lat.toFixed(6)}`;
-      lngEl.textContent = `خط الطول: ${lng.toFixed(6)}`;
+    // --- حساب المسافة بين نقطتين (بالمتر) ---
+    function haversine(lat1, lon1, lat2, lon2) {
+      const R = 6371000; // نصف قطر الأرض بالمتر
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
     }
 
-    function onLocationSuccess(pos) {
-      const { latitude, longitude } = pos.coords;
-      statusEl.className = 'success';
-      statusEl.textContent = '✅ تم اكتشاف موقعك بنجاح!';
-      updateCoords(latitude, longitude);
-      
-      // يمكنك إرسال هذه الإحداثيات إلى نظام عدّ الخطوات لاحقًا
-      console.log('الموقع المكتشف:', { latitude, longitude });
-    }
+    // --- تحديث الموقع ---
+    function updateLocation() {
+      if (!isTracking) return;
 
-    function onLocationError(error) {
-      statusEl.className = 'error';
-      let msg = '❌ فشل تحديد الموقع: ';
-      switch(error.code) {
-        case error.PERMISSION_DENIED:
-          msg += 'الوصول إلى الموقع مرفوض.';
-          break;
-        case error.POSITION_UNAVAILABLE:
-          msg += 'الموقع غير متاح حاليًّا.';
-          break;
-        case error.TIMEOUT:
-          msg += 'انتهى وقت الطلب. حاول لاحقًا.';
-          break;
-        default:
-          msg += 'خطأ غير معروف.';
-      }
-      statusEl.textContent = msg;
-      console.error('GPS Error:', error);
-    }
-
-    function requestLocation() {
       if (!navigator.geolocation) {
         statusEl.className = 'error';
-        statusEl.textContent = '❌ هذا المتصفح لا يدعم تحديد الموقع.';
+        statusEl.textContent = '❌ GPS غير مدعوم';
         return;
       }
 
-      statusEl.className = 'pending';
-      statusEl.textContent = '📍 جارٍ تحديد موقعك...';
-
-      // طلب الموقع الحقيقي (بدقة عالية)
       navigator.geolocation.getCurrentPosition(
-        onLocationSuccess,
-        onLocationError,
+        (pos) => {
+          const { latitude, longitude } = pos.coords;
+          latEl.textContent = `خط العرض: ${latitude.toFixed(6)}`;
+          lngEl.textContent = `خط الطول: ${longitude.toFixed(6)}`;
+
+          // الفلتر 1: تجاهل أول قراءة (لا مسافة بدون نقطة سابقة)
+          if (!lastPosition) {
+            lastPosition = { lat: latitude, lng: longitude };
+            lastValidPosition = { lat: latitude, lng: longitude };
+            statusEl.className = 'success';
+            statusEl.textContent = '✅ GPS نشط — جارٍ تتبع المسافة...';
+            return;
+          }
+
+          // الفلتر 2: حساب المسافة من آخر موقع "صالح"
+          const d = haversine(
+            lastValidPosition.lat,
+            lastValidPosition.lng,
+            latitude,
+            longitude
+          );
+
+          // الفلتر 3: لا نحسب الحركة الصغيرة (< 2 متر)
+          if (d >= MIN_DISTANCE_PER_STEP) {
+            totalDistance += d;
+            // تحديث العرض (متر أو كم)
+            if (totalDistance >= 1000) {
+              distanceEl.textContent = (totalDistance / 1000).toFixed(2) + ' كم';
+            } else {
+              distanceEl.textContent = Math.round(totalDistance) + ' م';
+            }
+            // نقبل هذا الموقع كنقطة صالحة للمقارنة القادمة
+            lastValidPosition = { lat: latitude, lng: longitude };
+          }
+
+          // نحدّث lastPosition دائمًا (لعرض الإحداثيات الحية)
+          lastPosition = { lat: latitude, lng: longitude };
+        },
+        (error) => {
+          console.warn('GPS Error:', error);
+          statusEl.className = 'error';
+          statusEl.textContent = '⚠️ خطأ في GPS — تأكد من تفعيل الموقع.';
+        },
         {
-          enableHighAccuracy: true,   // يستخدم GPS إن توفر
-          timeout: 10000,            // ينتظر 10 ثوانٍ كحد أقصى
-          maximumAge: 30000          // يقبل موقعًا قديمًا بأقل من 30 ثانية
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 10000
         }
       );
     }
 
-    // بدء عند النقر
-    startBtn.addEventListener('click', requestLocation);
+    // --- التحكم ---
+    function startTracking() {
+      if (!navigator.geolocation) {
+        statusEl.className = 'error';
+        statusEl.textContent = '❌ المتصفح لا يدعم GPS';
+        return;
+      }
 
-    // طلب إذن الموقع تلقائيًّا عند التحميل (إن أمكن)
-    // لكن معظم المتصفحات تتطلب تفاعل المستخدم أولاً (مثل النقر)
+      isTracking = true;
+      totalDistance = 0;
+      lastPosition = null;
+      lastValidPosition = null;
+      distanceEl.textContent = '0.00 م';
+      statusEl.className = 'pending';
+      statusEl.textContent = '📍 جارٍ تفعيل GPS...';
+
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+
+      updateLocation(); // أول قراءة فورية
+      positionInterval = setInterval(updateLocation, UPDATE_INTERVAL);
+    }
+
+    function stopTracking() {
+      isTracking = false;
+      clearInterval(positionInterval);
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      statusEl.className = 'pending';
+      statusEl.textContent = 'تم الإيقاف. المسافة النهائية: ' + 
+        (totalDistance >= 1000 ? (totalDistance/1000).toFixed(2) + ' كم' : Math.round(totalDistance) + ' م');
+    }
+
+    // --- ربط الأزرار ---
+    startBtn.addEventListener('click', startTracking);
+    stopBtn.addEventListener('click', stopTracking);
   </script>
 </body>
 </html>
