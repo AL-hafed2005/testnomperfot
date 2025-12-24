@@ -3,77 +3,102 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>عداد الخطوات من الحساس مباشرة</setTitle>
+  <title>عداد الخطوات</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
       text-align: center;
       padding: 30px;
-      background: #f5f5f5;
+      background: #f9f9f9;
+      color: #333;
     }
     #steps {
-      font-size: 60px;
-      color: #2c3e50;
+      font-size: 70px;
+      font-weight: bold;
+      color: #2980b9;
       margin: 20px 0;
     }
-    .label {
-      font-size: 24px;
-      color: #7f8c8d;
+    .status {
+      font-size: 18px;
+      margin: 15px 0;
+      padding: 10px;
+      border-radius: 8px;
+      background: #ecf0f1;
+    }
+    .error {
+      background: #ffebee;
+      color: #c62828;
+    }
+    .ready {
+      background: #e8f5e9;
+      color: #2e7d32;
     }
   </style>
 </head>
 <body>
-  <div class="label">عدد الخطوات:</div>
+  <h2>عداد الخطوات من الحساس مباشرة</h2>
   <div id="steps">0</div>
-  <div class="label" id="status">الرجاء السماح بالوصول إلى الحساسات...</div>
+  <div id="status" class="status">جارٍ التحقق من دعم الحساس...</div>
 
   <script>
+    const statusEl = document.getElementById('status');
+    const stepsEl = document.getElementById('steps');
+
     let stepCount = 0;
     let lastAccel = 0;
-    const threshold = 1.5; // عتبة الكشف عن الخطوة (يمكنك ضبطها)
+    const threshold = 1.8; // عتبة بسيطة
+
+    // تحقق أولي: هل المتصفح يدعم DeviceMotion؟
+    if (typeof DeviceMotionEvent !== 'undefined') {
+      statusEl.textContent = 'تم اكتشاف دعم الحساس. طلب الإذن...';
+
+      // iOS يتطلب طلب إذن صريح
+      if (typeof DeviceMotionEvent.requestPermission === 'function') {
+        // انتظار أي تفاعل من المستخدم (مثل لمس الشاشة)
+        const askPermission = () => {
+          DeviceMotionEvent.requestPermission()
+            .then(permission => {
+              if (permission === 'granted') {
+                statusEl.textContent = '✅ جاهز! ابدأ المشي لحساب الخطوات.';
+                statusEl.className = 'status ready';
+                window.addEventListener('devicemotion', handleMotion);
+              } else {
+                statusEl.textContent = '❌ لم يتم منح إذن الوصول إلى الحساس.';
+                statusEl.className = 'status error';
+              }
+            })
+            .catch(err => {
+              statusEl.textContent = 'خطأ في طلب الإذن: ' + err.message;
+              statusEl.className = 'status error';
+            });
+        };
+
+        // طلب الإذن عند أول تفاعل
+        document.body.addEventListener('click', askPermission, { once: true });
+        document.body.addEventListener('touchstart', askPermission, { once: true });
+      } else {
+        // Android أو متصفحات لا تتطلب إذنًا صريحًا
+        statusEl.textContent = '✅ جاهز! ابدأ المشي لحساب الخطوات.';
+        statusEl.className = 'status ready';
+        window.addEventListener('devicemotion', handleMotion);
+      }
+    } else {
+      statusEl.textContent = '❌ هذا الجهاز أو المتصفح لا يدعم حساسات الحركة.';
+      statusEl.className = 'status error';
+    }
 
     function handleMotion(event) {
-      const acceleration = event.accelerationIncludingGravity;
-      if (!acceleration) return;
+      const acc = event.accelerationIncludingGravity;
+      if (!acc) return;
 
-      // نحسب التسارع الكلي (magnitude)
-      const accel = Math.sqrt(
-        acceleration.x ** 2 + 
-        acceleration.y ** 2 + 
-        acceleration.z ** 2
-      );
-
-      // نحسب التغير في التسارع مقارنة بالقيمة السابقة
+      const accel = Math.sqrt(acc.x ** 2 + acc.y ** 2 + acc.z ** 2);
       const delta = Math.abs(accel - lastAccel);
       lastAccel = accel;
 
-      // إذا تجاوز التغير العتبة، نعتبرها خطوة
       if (delta > threshold) {
         stepCount++;
-        document.getElementById('steps').textContent = stepCount;
+        stepsEl.textContent = stepCount;
       }
-    }
-
-    // طلب إذن الوصول إلى الحساسات (مطلوب في iOS وChrome الحديث)
-    if (typeof DeviceMotionEvent.requestPermission === 'function') {
-      // على iOS
-      document.getElementById('status').textContent = 'اضغط في أي مكان لتفعيل الحساس';
-      document.body.addEventListener('click', () => {
-        DeviceMotionEvent.requestPermission()
-          .then(permissionState => {
-            if (permissionState === 'granted') {
-              window.addEventListener('devicemotion', handleMotion);
-              document.getElementById('status').textContent = 'جاهز! ابدأ بالمشي...';
-            } else {
-              document.getElementById('status').textContent = 'الوصول إلى الحساس مرفوض.';
-            }
-          })
-          .catch(console.error);
-      });
-    } else {
-      // على Android وباقي الأنظمة
-      window.addEventListener('devicemotion', handleMotion);
-      document.getElementById('status').textContent = 'جاهز! ابدأ بالمشي...';
     }
   </script>
 </body>
