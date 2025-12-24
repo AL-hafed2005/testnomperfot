@@ -3,16 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>نظام متابعة اللياقة البدنية</title>
+  <title>نظام GPS عالي الدقة</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
     body {
       font-family: 'Segoe UI', Tahoma, sans-serif;
-      background: linear-gradient(135deg, #1a2a6c, #2a5298);
+      background: #0d1b2a;
       color: white;
       padding: 20px;
       min-height: 100vh;
@@ -21,297 +16,231 @@
       max-width: 450px;
       margin: 0 auto;
     }
-    header {
+    header h1 {
       text-align: center;
       margin-bottom: 25px;
-      padding: 15px;
-    }
-    header h1 {
-      font-size: 26px;
-      font-weight: bold;
-      text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      font-size: 24px;
     }
     .card {
-      background: white;
-      color: #333;
+      background: #1b263b;
       border-radius: 16px;
       padding: 25px;
-      margin-bottom: 25px;
-      box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+      margin-bottom: 20px;
+      box-shadow: 0 6px 15px rgba(0,0,0,0.4);
     }
-    .metric-box {
-      text-align: center;
-      margin: 15px 0;
+    .metric {
+      font-size: 28px;
+      font-weight: bold;
+      margin: 12px 0;
+      color: #4cc9f0;
     }
-    .metric-label {
+    .label {
+      color: #caf0f8;
       font-size: 16px;
-      color: #666;
       margin-bottom: 5px;
     }
-    .metric-value {
-      font-size: 32px;
-      font-weight: bold;
-      color: #2c3e50;
-    }
-    .coords {
+    .coord {
       font-family: monospace;
-      background: #f8f9fa;
-      padding: 10px;
+      background: #0d1b2a;
+      padding: 12px;
       border-radius: 10px;
       margin: 12px 0;
-      font-size: 15px;
       direction: ltr;
       text-align: center;
-      border: 1px solid #ddd;
+      border: 1px solid #3e5c76;
+      font-size: 16px;
     }
     #status {
       padding: 12px;
       border-radius: 10px;
       margin: 15px 0;
-      font-weight: bold;
       text-align: center;
-      background: #e9ecef;
-      color: #495057;
-    }
-    .btn-group {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-      margin-top: 15px;
+      font-weight: bold;
+      background: #1b263b;
+      color: #ff9e00;
+      border: 1px solid #4361ee;
     }
     .btn {
-      padding: 14px 20px;
+      width: 100%;
+      padding: 14px;
       font-size: 18px;
       border: none;
       border-radius: 12px;
       cursor: pointer;
       font-weight: bold;
-      flex: 1;
+      margin-top: 10px;
     }
     .btn-start { background: #2ecc71; color: white; }
     .btn-stop { background: #e74c3c; color: white; }
-    .btn:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   </style>
 </head>
 <body>
   <div class="container">
     <header>
-      <h1>نظام متابعة اللياقة البدنية</h1>
+      <h1>نظام GPS عالي الدقة (GNSS متعدد الأقمار)</h1>
     </header>
 
     <div class="card">
-      <div class="metric-box">
-        <div class="metric-label">عدد الخطوات</div>
-        <div class="metric-value" id="steps">0</div>
-      </div>
+      <div class="label">المسافة المقطوعة</div>
+      <div class="metric" id="distance">0.00 م</div>
 
-      <div class="metric-box">
-        <div class="metric-label">المسافة</div>
-        <div class="metric-value" id="distance">0.00 م</div>
-      </div>
+      <div class="label">خط العرض</div>
+      <div class="coord" id="lat">—</div>
 
-      <div id="status">اضغط "ابدأ التمرين" لتفعيل GPS والحساس</div>
+      <div class="label">خط الطول</div>
+      <div class="coord" id="lng">—</div>
 
-      <div class="coords" id="lat">خط العرض: —</div>
-      <div class="coords" id="lng">خط الطول: —</div>
+      <div class="label">عدد النقاط الموثوقة</div>
+      <div class="metric" id="pointCount">0</div>
 
-      <div class="btn-group">
-        <button id="startBtn" class="btn btn-start">ابدأ التمرين</button>
-        <button id="stopBtn" class="btn btn-stop" disabled>إيقاف</button>
-      </div>
+      <div id="status">جاري التحضير... تأكد من تفعيل "الدقة العالية" في إعدادات الموقع</div>
+
+      <button id="startBtn" class="btn btn-start">ابدأ التتبع عالي الدقة</button>
+      <button id="stopBtn" class="btn btn-stop" disabled>إيقاف</button>
     </div>
   </div>
 
   <script>
-    // === المتغيرات الأساسية ===
+    // === المتغيرات ===
     let isTracking = false;
-    let stepCount = 0;
     let totalDistance = 0;
-    let lastAccel = 0;
-    let lastGpsPosition = null;
-    let lastValidGps = null;
-    let lastStepTime = 0;
-    let lastGpsUpdate = 0;
+    let lastPosition = null;
+    let validPositions = []; // لحفظ النقاط الموثوقة
+    let lastGpsTime = 0;
 
-    // === عتبات منع الغش والفلترة ===
-    const ACCEL_THRESHOLD = 1.6;
-    const MIN_STEP_INTERVAL = 400;      // ms بين الخطوات
-    const GPS_UPDATE_INTERVAL = 1500;   // تحديث GPS كل 1.5 ثانية
-    const MIN_GPS_STEP = 0.5;           // أقل مسافة من GPS لاعتبارها حركة حقيقية
+    // === إعدادات الدقة العالية ===
+    const UPDATE_INTERVAL = 800;        // تحديث كل 0.8 ثانية
+    const MIN_DISTANCE_FILTER = 0.8;    // متر: لتصفية الضوضاء
+    const MAX_SPEED_KMH = 25;           // لتصفية القفزات (شخص لا يمشي بـ 50 كم/س!)
 
-    // === عناصر الواجهة ===
-    const stepsEl = document.getElementById('steps');
+    // عناصر الواجهة
     const distanceEl = document.getElementById('distance');
     const latEl = document.getElementById('lat');
     const lngEl = document.getElementById('lng');
+    const pointCountEl = document.getElementById('pointCount');
     const statusEl = document.getElementById('status');
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
 
-    // === دالة حساب المسافة (Haversine) ===
-    function haversine(lat1, lon1, lat2, lon2) {
+    // === حساب المسافة (Haversine) ===
+    function haversine(p1, p2) {
       const R = 6371000;
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const dLat = (p2.lat - p1.lat) * Math.PI / 180;
+      const dLon = (p2.lng - p1.lng) * Math.PI / 180;
       const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.cos(p1.lat * Math.PI / 180) * Math.cos(p2.lat * Math.PI / 180) *
                 Math.sin(dLon/2) * Math.sin(dLon/2);
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       return R * c;
     }
 
-    // === معالجة بيانات الحساس (التسارع) ===
-    function handleAccelerometer(event) {
-      if (!isTracking) return;
-      const acc = event.accelerationIncludingGravity;
-      if (!acc) return;
-
-      const now = Date.now();
-      const accel = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-      const delta = Math.abs(accel - lastAccel);
-      lastAccel = accel;
-
-      if (delta > ACCEL_THRESHOLD && (now - lastStepTime) > MIN_STEP_INTERVAL) {
-        // لا نحسب الخطوة الآن! سننتظر تأكيد GPS
-        potentialStepTime = now;
-        hasPotentialStep = true;
-      }
+    // === فلتر متقدم: رفض القيم الشاذة (Outlier Rejection) ===
+    function isOutlier(newPos, lastPos, timeDiffMs) {
+      if (!lastPos) return false;
+      const distance = haversine(lastPos, newPos);
+      const speed = (distance / timeDiffMs) * 3600; // م/ساعة → كم/ساعة
+      return speed > MAX_SPEED_KMH * 1000; // تحويل كم/س إلى م/س
     }
 
-    let hasPotentialStep = false;
-    let potentialStepTime = 0;
-
-    // === تحديث الموقع عبر GPS ===
-    function updateGps() {
+    // === تحديث الموقع عالي الدقة ===
+    function updateGpsHighAccuracy() {
       if (!isTracking) return;
       const now = Date.now();
-      if (now - lastGpsUpdate < GPS_UPDATE_INTERVAL) return;
-
-      if (!navigator.geolocation) {
-        statusEl.textContent = '❌ GPS غير مدعوم';
-        return;
-      }
 
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          const { latitude, longitude } = pos.coords;
-          latEl.textContent = `خط العرض: ${latitude.toFixed(6)}`;
-          lngEl.textContent = `خط الطول: ${longitude.toFixed(6)}`;
-          lastGpsUpdate = now;
+          const { latitude, longitude, accuracy } = pos.coords;
+          const timeDiff = now - lastGpsTime;
 
-          // حفظ أول موقع
-          if (!lastGpsPosition) {
-            lastGpsPosition = { lat: latitude, lng: longitude };
-            lastValidGps = { lat: latitude, lng: longitude };
-            statusEl.textContent = '✅ جارٍ التسجيل...';
+          // عرض الإحداثيات فورًا (حتى لو لم تُحسب بعد)
+          latEl.textContent = latitude.toFixed(7);
+          lngEl.textContent = longitude.toFixed(7);
+
+          const newPosition = { lat: latitude, lng: longitude, accuracy, time: now };
+
+          // الفلتر 1: تجاهل القراءات غير الدقيقة جدًّا
+          if (accuracy > 20) { // أكثر من 20 متر دقة = غير موثوق
+            statusEl.textContent = `📡 دقة منخفضة (${accuracy.toFixed(1)} م) — لا تُحسب`;
             return;
           }
 
-          // حساب المسافة من آخر موقع موثوق
-          const d = haversine(
-            lastValidGps.lat,
-            lastValidGps.lng,
-            latitude,
-            longitude
-          );
+          // الفلتر 2: رفض القيم الشاذة (قفزات سرعة غير منطقية)
+          if (lastPosition && isOutlier(newPosition, lastPosition, timeDiff)) {
+            statusEl.textContent = '⚠️ تم رفض نقطة غير منطقية (قفزة سرعة)';
+            return;
+          }
 
-          // إذا كانت الحركة كبيرة بما يكفي
-          if (d >= MIN_GPS_STEP) {
-            totalDistance += d;
-            // تحديث عرض المسافة
-            if (totalDistance >= 1000) {
-              distanceEl.textContent = (totalDistance / 1000).toFixed(2) + ' كم';
-            } else {
-              distanceEl.textContent = Math.round(totalDistance) + ' م';
-            }
-            lastValidGps = { lat: latitude, lng: longitude };
-
-            // ✅ التحقق المزدوج: إذا كانت هناك خطوة محتملة → نحسبها
-            if (hasPotentialStep) {
-              stepCount++;
-              stepsEl.textContent = stepCount;
-              lastStepTime = potentialStepTime;
-              hasPotentialStep = false;
+          // الفلتر 3: لا نحسب إلا إذا تحركنا أكثر من MIN_DISTANCE_FILTER
+          if (lastPosition) {
+            const d = haversine(lastPosition, newPosition);
+            if (d >= MIN_DISTANCE_FILTER) {
+              totalDistance += d;
+              // تحديث العرض
+              if (totalDistance >= 1000) {
+                distanceEl.textContent = (totalDistance / 1000).toFixed(3) + ' كم';
+              } else {
+                distanceEl.textContent = totalDistance.toFixed(1) + ' م';
+              }
+              validPositions.push(newPosition);
+              pointCountEl.textContent = validPositions.length;
             }
           }
 
-          lastGpsPosition = { lat: latitude, lng: longitude };
+          lastPosition = newPosition;
+          lastGpsTime = now;
+          statusEl.textContent = `✅ دقة: ${accuracy.toFixed(1)} م | تحديث كل ${UPDATE_INTERVAL} مللي ثانية`;
         },
         (error) => {
-          console.warn('GPS Error:', error);
-          statusEl.textContent = '⚠️ خطأ في GPS — تأكد من تفعيل الموقع.';
+          console.error('GPS Error:', error);
+          statusEl.textContent = '❌ خطأ في GPS: تأكد من تفعيل "الوضع عالي الدقة"';
         },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 10000 }
+        {
+          enableHighAccuracy: true,   // ← هذا يفعّل GNSS متعدد الأقمار تلقائيًّا
+          timeout: 10000,
+          maximumAge: 0               // لا نقبل بيانات قديمة
+        }
       );
     }
 
-    // === بدء التمرين ===
-    function startWorkout() {
+    // === بدء التتبع ===
+    function startTracking() {
       if (!navigator.geolocation) {
-        statusEl.textContent = '❌ GPS غير مدعوم';
+        statusEl.textContent = '❌ المتصفح لا يدعم تحديد الموقع';
         return;
       }
 
-      // طلب إذن الحساس (إن لزم - iOS)
-      if (typeof DeviceMotionEvent.requestPermission === 'function') {
-        DeviceMotionEvent.requestPermission().then(permission => {
-          if (permission === 'granted') {
-            initTracking();
-          } else {
-            statusEl.textContent = '❌ لم يُمنح إذن الوصول إلى الحساس';
-          }
-        }).catch(console.error);
-      } else {
-        initTracking();
-      }
-    }
-
-    function initTracking() {
+      // تأكد من أن المستخدم في "وضع الدقة العالية"
+      statusEl.textContent = '✅ جاري التفعيل... تأكد من إعدادات الموقع: "استخدام GPS"';
       isTracking = true;
-      stepCount = 0;
       totalDistance = 0;
-      lastGpsPosition = null;
-      lastValidGps = null;
-      hasPotentialStep = false;
-
-      stepsEl.textContent = '0';
+      lastPosition = null;
+      validPositions = [];
       distanceEl.textContent = '0.00 م';
-      latEl.textContent = 'خط العرض: —';
-      lngEl.textContent = 'خط الطول: —';
-      statusEl.textContent = 'جارٍ تفعيل GPS...';
+      pointCountEl.textContent = '0';
 
       startBtn.disabled = true;
       stopBtn.disabled = false;
 
-      // ربط الحساس
-      window.addEventListener('devicemotion', handleAccelerometer);
-      // أول تحديث GPS
-      updateGps();
-      // تحديث دوري
-      gpsInterval = setInterval(updateGps, GPS_UPDATE_INTERVAL);
+      updateGpsHighAccuracy(); // أول قراءة
+      gpsInterval = setInterval(updateGpsHighAccuracy, UPDATE_INTERVAL);
     }
 
-    // === إيقاف التمرين ===
-    function stopWorkout() {
+    // === إيقاف التتبع ===
+    function stopTracking() {
       isTracking = false;
       clearInterval(gpsInterval);
-      window.removeEventListener('devicemotion', handleAccelerometer);
-
       startBtn.disabled = false;
       stopBtn.disabled = true;
-
-      statusEl.textContent = `تم الانتهاء! الخطوات: ${stepCount} | المسافة: ${
-        totalDistance >= 1000 ? (totalDistance/1000).toFixed(2) + ' كم' : Math.round(totalDistance) + ' م'
-      }`;
+      statusEl.textContent = `⏹️ تم الإيقاف. المسافة: ${
+        totalDistance >= 1000 ? (totalDistance/1000).toFixed(3) + ' كم' : totalDistance.toFixed(1) + ' م'
+      } (${validPositions.length} نقطة موثوقة)`;
     }
 
     // === ربط الأزرار ===
     let gpsInterval = null;
-    startBtn.addEventListener('click', startWorkout);
-    stopBtn.addEventListener('click', stopWorkout);
+    startBtn.addEventListener('click', startTracking);
+    stopBtn.addEventListener('click', stopTracking);
   </script>
 </body>
 </html>
