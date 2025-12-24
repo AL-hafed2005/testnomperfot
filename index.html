@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>عداد الخطوات</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+    }
+    body {
+      background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: white;
+      text-align: center;
+      padding: 20px;
+    }
+    .container {
+      background: rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(10px);
+      border-radius: 24px;
+      padding: 40px;
+      width: 90%;
+      max-width: 500px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    }
+    h1 {
+      font-size: 2.2rem;
+      margin-bottom: 30px;
+      font-weight: 700;
+    }
+    .step-display {
+      font-size: 6rem;
+      font-weight: 800;
+      margin: 20px 0;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+    .status {
+      font-size: 1.1rem;
+      margin-top: 15px;
+      opacity: 0.9;
+    }
+    .info {
+      margin-top: 30px;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      opacity: 0.85;
+    }
+    @media (max-width: 480px) {
+      .step-display {
+        font-size: 4.5rem;
+      }
+      h1 {
+        font-size: 1.8rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>عداد الخطوات</h1>
+    <div class="step-display" id="stepCount">0</div>
+    <div class="status" id="status">🚶‍♂️ جاهز... ابدأ المشي!</div>
+    <div class="info">
+      ✅ يعمل على الهاتف فقط<br>
+      ✅ لا يحسب الهز أو الحركة العشوائية<br>
+      ✅ لا يحتاج الإنترنت أو GPS
+    </div>
+  </div>
+
+  <script>
+    let stepCount = 0;
+    let lastPeakTime = 0;
+    let accelerationHistory = [];
+    const STEP_THRESHOLD = 1.8;      // حد التسارع (g)
+    const MIN_STEP_INTERVAL = 300;   // أقل وقت بين خطوتين (مللي ثانية)
+    const MAX_STEP_INTERVAL = 1500;  // أكثر وقت بين خطوتين
+    const HISTORY_SIZE = 10;         // عدد العينات للتحليل
+
+    // تحديث العرض
+    function updateDisplay() {
+      document.getElementById('stepCount').innerText = stepCount;
+      document.getElementById('status').innerText = `🚶‍♂️ الخطوات: ${stepCount}`;
+    }
+
+    // معالجة الحركة
+    function handleMotion(event) {
+      const accel = event.accelerationIncludingGravity;
+      if (!accel) return;
+
+      const currentAccel = Math.abs(accel.y || accel.z || 0);
+      const now = Date.now();
+
+      // حفظ السجل
+      accelerationHistory.push({ time: now, value: currentAccel });
+      if (accelerationHistory.length > HISTORY_SIZE) {
+        accelerationHistory.shift();
+      }
+
+      // نحتاج 5 عينات على الأقل
+      if (accelerationHistory.length < 5) return;
+
+      // تحليل النمط: هل هناك "قمة"؟
+      const recent = accelerationHistory.slice(-5);
+      const mid = recent[2].value;
+      const isPeak = (
+        mid > recent[1].value &&
+        mid > recent[3].value &&
+        mid > STEP_THRESHOLD
+      );
+
+      if (isPeak && now - lastPeakTime > MIN_STEP_INTERVAL) {
+        // تأكيد وجود "وادي" بعد القمة (لمنع الهز)
+        setTimeout(() => {
+          const newAccel = Math.abs(window.lastAccel || 0);
+          if (newAccel < mid - 0.5) {
+            const stepTimeDelta = now - lastPeakTime;
+            if (stepTimeDelta >= MIN_STEP_INTERVAL && stepTimeDelta <= MAX_STEP_INTERVAL) {
+              stepCount++;
+              lastPeakTime = now;
+              updateDisplay();
+            }
+          }
+        }, 100);
+        window.lastAccel = currentAccel;
+      }
+    }
+
+    // طلب الإذن (iOS)
+    function startTracking() {
+      if (typeof DeviceMotionEvent !== 'undefined') {
+        if (typeof DeviceMotionEvent.requestPermission === 'function') {
+          // iOS 13+
+          DeviceMotionEvent.requestPermission()
+            .then(permission => {
+              if (permission === 'granted') {
+                window.addEventListener('devicemotion', handleMotion);
+                document.getElementById('status').innerText = '✅ جاهز! ابدأ المشي...';
+              } else {
+                document.getElementById('status').innerText = '❌ يرجى السماح بالحركة في الإعدادات';
+              }
+            })
+            .catch(console.error);
+        } else {
+          // Android و غير iOS
+          window.addEventListener('devicemotion', handleMotion);
+          document.getElementById('status').innerText = '✅ جاهز! ابدأ المشي...';
+        }
+      } else {
+        document.getElementById('status').innerText = '⚠️ جهازك لا يدعم مستشعر الحركة';
+      }
+    }
+
+    // بدء التشغيل
+    window.addEventListener('load', () => {
+      // تأخير بسيط لتحسين تجربة المستخدم
+      setTimeout(startTracking, 1000);
+    });
+  </script>
+</body>
+</html>
