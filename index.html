@@ -3,201 +3,144 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>عداد خطوات ذكي مع GPS - بدون غش</title>
+  <title>اكتشاف الموقع الحقيقي</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
       text-align: center;
       padding: 20px;
-      background: #f9f9f9;
+      background: #f8f9fa;
       color: #333;
     }
-    .box {
+    .card {
       background: white;
-      padding: 20px;
-      margin: 15px auto;
-      border-radius: 12px;
-      max-width: 350px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      padding: 25px;
+      margin: 20px auto;
+      border-radius: 14px;
+      max-width: 400px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
     }
-    #steps, #distance {
-      font-size: 50px;
-      font-weight: bold;
-      color: #2980b9;
+    h2 {
+      margin-top: 0;
+      color: #2c3e50;
+    }
+    .coord {
+      font-size: 20px;
+      font-family: monospace;
+      background: #f1f8ff;
+      padding: 12px;
+      border-radius: 8px;
+      margin: 12px 0;
+      direction: ltr;
+      text-align: center;
+      border: 1px solid #bee0ff;
     }
     #status {
-      margin-top: 15px;
-      padding: 10px;
+      padding: 12px;
       border-radius: 8px;
-      background: #ecf0f1;
+      margin: 15px 0;
+      font-weight: bold;
     }
-    .label {
+    .pending { background: #fff8e1; color: #5d4037; }
+    .success { background: #e8f5e9; color: #2e7d32; }
+    .error { background: #ffebee; color: #c62828; }
+    button {
+      background: #3498db;
+      color: white;
+      border: none;
+      padding: 12px 25px;
       font-size: 18px;
+      border-radius: 8px;
+      cursor: pointer;
       margin-top: 10px;
-      color: #555;
+    }
+    button:hover {
+      background: #2980b9;
     }
   </style>
 </head>
 <body>
-  <div class="box">
-    <div class="label">عدد الخطوات</div>
-    <div id="steps">0</div>
+
+  <div class="card">
+    <h2>اكتشاف الموقع الجغرافي</h2>
     
-    <div class="label">المسافة (كم)</div>
-    <div id="distance">0.00</div>
-    
-    <div id="status">اضغط لبدء التمرين (يتطلب GPS + حساس)</div>
+    <div id="status" class="pending">جارٍ طلب إذن الوصول إلى الموقع...</div>
+
+    <div id="lat">خط العرض: —</div>
+    <div id="lng">خط الطول: —</div>
+
+    <button id="startBtn">اكتشاف الموقع الآن</button>
   </div>
 
   <script>
-    // --- المتغيرات الأساسية ---
-    let stepCount = 0;
-    let totalDistance = 0;
-    let lastAccel = 0;
-    let lastGpsPosition = null;
-    let isRecording = false;
-    let lastStepTime = 0;
-    let lastGpsUpdate = 0;
+    const statusEl = document.getElementById('status');
+    const latEl = document.getElementById('lat');
+    const lngEl = document.getElementById('lng');
+    const startBtn = document.getElementById('startBtn');
 
-    // --- عتبات منع الغش ---
-    const ACCEL_THRESHOLD = 1.5;
-    const MIN_STEP_INTERVAL = 400; // ms
-    const GPS_UPDATE_INTERVAL = 2000; // تحديث كل ثانيتين
-    const MIN_DISTANCE_TO_VALIDATE = 0.5; // متر
-
-    // --- دوال مساعدة ---
-    function haversine(lat1, lon1, lat2, lon2) {
-      const R = 6371000; // متر
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLon = (lon2 - lon1) * Math.PI / 180;
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-                Math.sin(dLon/2) * Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      return R * c;
+    // تحويل إحداثيات إلى نص عربي واضح
+    function updateCoords(lat, lng) {
+      latEl.textContent = `خط العرض: ${lat.toFixed(6)}`;
+      lngEl.textContent = `خط الطول: ${lng.toFixed(6)}`;
     }
 
-    function handleAccelerometer(event) {
-      if (!isRecording) return;
-      const acc = event.accelerationIncludingGravity;
-      if (!acc) return;
+    function onLocationSuccess(pos) {
+      const { latitude, longitude } = pos.coords;
+      statusEl.className = 'success';
+      statusEl.textContent = '✅ تم اكتشاف موقعك بنجاح!';
+      updateCoords(latitude, longitude);
+      
+      // يمكنك إرسال هذه الإحداثيات إلى نظام عدّ الخطوات لاحقًا
+      console.log('الموقع المكتشف:', { latitude, longitude });
+    }
 
-      const now = Date.now();
-      const accel = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-      const delta = Math.abs(accel - lastAccel);
-      lastAccel = accel;
-
-      // كشف خطوة محتملة (بدون حفظها بعد)
-      if (delta > ACCEL_THRESHOLD && (now - lastStepTime) > MIN_STEP_INTERVAL) {
-        // لا نزيد العد هنا! سننتظر تأكيد GPS
-        detectStepPending = true;
-        stepPendingTime = now;
+    function onLocationError(error) {
+      statusEl.className = 'error';
+      let msg = '❌ فشل تحديد الموقع: ';
+      switch(error.code) {
+        case error.PERMISSION_DENIED:
+          msg += 'الوصول إلى الموقع مرفوض.';
+          break;
+        case error.POSITION_UNAVAILABLE:
+          msg += 'الموقع غير متاح حاليًّا.';
+          break;
+        case error.TIMEOUT:
+          msg += 'انتهى وقت الطلب. حاول لاحقًا.';
+          break;
+        default:
+          msg += 'خطأ غير معروف.';
       }
+      statusEl.textContent = msg;
+      console.error('GPS Error:', error);
     }
 
-    let detectStepPending = false;
-    let stepPendingTime = 0;
-
-    function updateGpsPosition() {
-      if (!isRecording) return;
-      const now = Date.now();
-      if (now - lastGpsUpdate < GPS_UPDATE_INTERVAL) return;
-
+    function requestLocation() {
       if (!navigator.geolocation) {
-        document.getElementById('status').textContent = '❌ GPS غير مدعوم';
+        statusEl.className = 'error';
+        statusEl.textContent = '❌ هذا المتصفح لا يدعم تحديد الموقع.';
         return;
       }
 
+      statusEl.className = 'pending';
+      statusEl.textContent = '📍 جارٍ تحديد موقعك...';
+
+      // طلب الموقع الحقيقي (بدقة عالية)
       navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const { latitude, longitude } = pos.coords;
-          lastGpsUpdate = now;
-
-          // حساب المسافة من آخر موقع
-          if (lastGpsPosition) {
-            const distance = haversine(
-              lastGpsPosition.lat,
-              lastGpsPosition.lng,
-              latitude,
-              longitude
-            );
-            totalDistance += distance;
-            document.getElementById('distance').textContent = (totalDistance / 1000).toFixed(2);
-
-            // ✅ التحقق المزدوج: إذا كان هناك خطوة محتملة + مسافة > 0.5 متر
-            if (detectStepPending && distance >= MIN_DISTANCE_TO_VALIDATE) {
-              stepCount++;
-              document.getElementById('steps').textContent = stepCount;
-              lastStepTime = stepPendingTime;
-            }
-          }
-
-          lastGpsPosition = { lat: latitude, lng: longitude };
-          detectStepPending = false; // إعادة التعيين
-        },
-        (error) => {
-          console.warn('GPS Error:', error);
-          document.getElementById('status').textContent = '⚠️ خطأ في GPS';
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+        onLocationSuccess,
+        onLocationError,
+        {
+          enableHighAccuracy: true,   // يستخدم GPS إن توفر
+          timeout: 10000,            // ينتظر 10 ثوانٍ كحد أقصى
+          maximumAge: 30000          // يقبل موقعًا قديمًا بأقل من 30 ثانية
+        }
       );
     }
 
-    // --- بدء/إيقاف التمرين ---
-    function toggleRecording() {
-      const statusEl = document.getElementById('status');
-      if (!isRecording) {
-        // طلب إذن الحساس (إن لزم)
-        if (typeof DeviceMotionEvent.requestPermission === 'function') {
-          DeviceMotionEvent.requestPermission().then(permission => {
-            if (permission === 'granted') {
-              startRecording();
-            } else {
-              statusEl.textContent = '❌ رُفض الوصول إلى الحساس';
-            }
-          }).catch(console.error);
-        } else {
-          startRecording();
-        }
-      } else {
-        stopRecording();
-      }
-    }
+    // بدء عند النقر
+    startBtn.addEventListener('click', requestLocation);
 
-    function startRecording() {
-      isRecording = true;
-      stepCount = 0;
-      totalDistance = 0;
-      lastGpsPosition = null;
-      detectStepPending = false;
-      document.getElementById('steps').textContent = '0';
-      document.getElementById('distance').textContent = '0.00';
-      document.getElementById('status').textContent = 'جاري التسجيل...';
-
-      window.addEventListener('devicemotion', handleAccelerometer);
-      updateGpsPosition(); // أول قراءة
-      gpsInterval = setInterval(updateGpsPosition, GPS_UPDATE_INTERVAL);
-    }
-
-    function stopRecording() {
-      isRecording = false;
-      clearInterval(gpsInterval);
-      window.removeEventListener('devicemotion', handleAccelerometer);
-      document.getElementById('status').textContent = 'تم الإيقاف. اضغط للبدء من جديد.';
-    }
-
-    // --- تهيئة ---
-    let gpsInterval = null;
-    document.body.addEventListener('click', toggleRecording, { once: false });
-    document.body.addEventListener('touchstart', toggleRecording, { once: false });
-
-    // تحقق أولي
-    if (!('DeviceMotionEvent' in window)) {
-      document.getElementById('status').textContent = '❌ الحساس غير مدعوم';
-    }
-    if (!navigator.geolocation) {
-      document.getElementById('status').textContent = '❌ GPS غير مدعوم';
-    }
+    // طلب إذن الموقع تلقائيًّا عند التحميل (إن أمكن)
+    // لكن معظم المتصفحات تتطلب تفاعل المستخدم أولاً (مثل النقر)
   </script>
 </body>
 </html>
