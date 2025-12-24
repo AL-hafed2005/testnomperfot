@@ -3,102 +3,106 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>عداد الخطوات</title>
+  <title>عداد خطوات ذكي - بدون غش</title>
   <style>
     body {
-      font-family: 'Segoe UI', Tahoma, sans-serif;
+      font-family: Arial, sans-serif;
       text-align: center;
       padding: 30px;
-      background: #f9f9f9;
+      background: #f5f5f5;
       color: #333;
     }
     #steps {
-      font-size: 70px;
-      font-weight: bold;
-      color: #2980b9;
+      font-size: 60px;
+      color: #2c3e50;
       margin: 20px 0;
     }
-    .status {
-      font-size: 18px;
-      margin: 15px 0;
+    .label {
+      font-size: 22px;
+    }
+    #status {
+      margin-top: 15px;
       padding: 10px;
       border-radius: 8px;
       background: #ecf0f1;
     }
-    .error {
-      background: #ffebee;
-      color: #c62828;
-    }
-    .ready {
-      background: #e8f5e9;
-      color: #2e7d32;
-    }
   </style>
 </head>
 <body>
-  <h2>عداد الخطوات من الحساس مباشرة</h2>
+  <div class="label">عدد الخطوات:</div>
   <div id="steps">0</div>
-  <div id="status" class="status">جارٍ التحقق من دعم الحساس...</div>
+  <div id="status">جارٍ التحقق من الحساس...</div>
 
   <script>
-    const statusEl = document.getElementById('status');
-    const stepsEl = document.getElementById('steps');
-
     let stepCount = 0;
+    let lastPeakTime = 0;
     let lastAccel = 0;
-    const threshold = 1.8; // عتبة بسيطة
+    let lastValleyTime = 0;
+    let isValleyDetected = false;
 
-    // تحقق أولي: هل المتصفح يدعم DeviceMotion؟
-    if (typeof DeviceMotionEvent !== 'undefined') {
-      statusEl.textContent = 'تم اكتشاف دعم الحساس. طلب الإذن...';
-
-      // iOS يتطلب طلب إذن صريح
-      if (typeof DeviceMotionEvent.requestPermission === 'function') {
-        // انتظار أي تفاعل من المستخدم (مثل لمس الشاشة)
-        const askPermission = () => {
-          DeviceMotionEvent.requestPermission()
-            .then(permission => {
-              if (permission === 'granted') {
-                statusEl.textContent = '✅ جاهز! ابدأ المشي لحساب الخطوات.';
-                statusEl.className = 'status ready';
-                window.addEventListener('devicemotion', handleMotion);
-              } else {
-                statusEl.textContent = '❌ لم يتم منح إذن الوصول إلى الحساس.';
-                statusEl.className = 'status error';
-              }
-            })
-            .catch(err => {
-              statusEl.textContent = 'خطأ في طلب الإذن: ' + err.message;
-              statusEl.className = 'status error';
-            });
-        };
-
-        // طلب الإذن عند أول تفاعل
-        document.body.addEventListener('click', askPermission, { once: true });
-        document.body.addEventListener('touchstart', askPermission, { once: true });
-      } else {
-        // Android أو متصفحات لا تتطلب إذنًا صريحًا
-        statusEl.textContent = '✅ جاهز! ابدأ المشي لحساب الخطوات.';
-        statusEl.className = 'status ready';
-        window.addEventListener('devicemotion', handleMotion);
-      }
-    } else {
-      statusEl.textContent = '❌ هذا الجهاز أو المتصفح لا يدعم حساسات الحركة.';
-      statusEl.className = 'status error';
-    }
+    // عتبات مضبوطة لمنع الغش
+    const ACCEL_THRESHOLD = 1.5;   // الحد الأدنى للتسارع ليُعتبر حركة
+    const MIN_TIME_BETWEEN_STEPS = 300;   // أقل من 300ms = غش (اهتزاز سريع)
+    const MAX_TIME_BETWEEN_PEAK_VALLEY = 800; // ذروة ثم انخفاض خلال 800ms = خطوة حقيقية
 
     function handleMotion(event) {
       const acc = event.accelerationIncludingGravity;
       if (!acc) return;
 
+      const now = Date.now();
       const accel = Math.sqrt(acc.x ** 2 + acc.y ** 2 + acc.z ** 2);
-      const delta = Math.abs(accel - lastAccel);
+      const delta = accel - lastAccel;
       lastAccel = accel;
 
-      if (delta > threshold) {
-        stepCount++;
-        stepsEl.textContent = stepCount;
+      // اكتشاف "انخفاض" (valley): تسارع منخفض بعد ارتفاع
+      if (accel < 8.0 && delta < -0.8) {
+        lastValleyTime = now;
+        isValleyDetected = true;
       }
+
+      // اكتشاف "ذروة" (peak): تسارع مرتفع
+      if (Math.abs(delta) > ACCEL_THRESHOLD) {
+        // تحقق: هل سبقته "انخفاض" خلال فترة زمنية منطقية؟
+        if (isValleyDetected && (now - lastValleyTime) < MAX_TIME_BETWEEN_PEAK_VALLEY) {
+          // تحقق: هل مر وقت كافٍ منذ آخر خطوة؟
+          if ((now - lastPeakTime) > MIN_TIME_BETWEEN_STEPS) {
+            stepCount++;
+            document.getElementById('steps').textContent = stepCount;
+            lastPeakTime = now;
+            isValleyDetected = false; // إعادة التعيين بعد العدّ
+          }
+        }
+      }
+    }
+
+    // --- بدء التشغيل ---
+    const statusEl = document.getElementById('status');
+
+    if (typeof DeviceMotionEvent !== 'undefined') {
+      if (typeof DeviceMotionEvent.requestPermission === 'function') {
+        statusEl.textContent = 'اضغط في أي مكان لتفعيل الحساس';
+        const enableSensor = () => {
+          DeviceMotionEvent.requestPermission()
+            .then(state => {
+              if (state === 'granted') {
+                window.addEventListener('devicemotion', handleMotion);
+                statusEl.textContent = '✅ جاهز! المشي فقط يُحسب (الغش ممنوع).';
+              } else {
+                statusEl.textContent = '❌ لم يُمنح إذن الوصول إلى الحساس.';
+              }
+            })
+            .catch(err => {
+              statusEl.textContent = 'خطأ: ' + err.message;
+            });
+        };
+        document.body.addEventListener('click', enableSensor, { once: true });
+        document.body.addEventListener('touchstart', enableSensor, { once: true });
+      } else {
+        window.addEventListener('devicemotion', handleMotion);
+        statusEl.textContent = '✅ جاهز! المشي فقط يُحسب (الغش ممنوع).';
+      }
+    } else {
+      statusEl.textContent = '❌ هذا الجهاز لا يدعم حساسات الحركة.';
     }
   </script>
 </body>
